@@ -5,7 +5,7 @@
 #include "cubecell_SSD1306Wire.h"
 #include <LoraMessage.h>
 
-//Don't use ADR for mobile devices: use this fixed data rate (region dependent?)
+//Don't use ADR for mobile devices: use this fixed data rate
 uint8_t txDataRate=2;
 
 // How often to transmit positions (ms)
@@ -18,6 +18,7 @@ bool isTxConfirmed = false;
 uint8_t devEui[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 uint8_t appEui[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 uint8_t appKey[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+
 /* ABP para*/
 uint8_t nwkSKey[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 uint8_t appSKey[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
@@ -34,6 +35,8 @@ bool loraWanAdr = false; //Don't use ADR for mobile devices
 bool keepNet = LORAWAN_NET_RESERVE;
 uint8_t appPort = 1;
 uint8_t confirmedNbTrials = 4;
+
+#define MAXHDOP 2.0
 
 int fracPart(double val, int n)
 {
@@ -78,50 +81,73 @@ void setup() {
   LoRaWAN.displayMcuInit();
   deviceState = DEVICE_STATE_INIT;
   LoRaWAN.ifskipjoin();
+
+  Air530.begin();    
+  Air530.sendcmd("$PGKC115,1,1,1,1*2B\r\n"); // mode: gps, glonass, beidou, galileo [0: off, 1: on]
+  Air530.setNMEA(NMEA_GGA|NMEA_RMC|NMEA_VTG);  
+}
+
+bool validGPS() {
+  if (Air530.date.isValid() && Air530.location.isValid() && Air530.altitude.isValid() && Air530.location.age() < 10000) return true;
+  else return false;
 }
 
 void loop()
 {
   if (joined) {
-    if (Air530.date.isValid() && Air530.location.age() < 10000) {    
+    if ( validGPS() ) {    
       char str[30];
-      display.clear();
-      display.setFont(ArialMT_Plain_10);
-      int index = sprintf(str,"%02d-%02d-%02d",Air530.date.year(),Air530.date.day(),Air530.date.month());
-      str[index] = 0;
-      display.setTextAlignment(TEXT_ALIGN_LEFT);
-      display.drawString(0, 0, str);
+      int index;      
+      if ( Air530.hdop.hdop() < MAXHDOP ) {
+        display.clear();
+        display.setFont(ArialMT_Plain_10);
+        index = sprintf(str,"%02d-%02d-%02d",Air530.date.year(),Air530.date.day(),Air530.date.month());
+        str[index] = 0;
+        display.setTextAlignment(TEXT_ALIGN_LEFT);
+        display.drawString(0, 0, str);
   
-      index = sprintf(str,"%02d:%02d:%02d",Air530.time.hour(),Air530.time.minute(),Air530.time.second(),Air530.time.centisecond());
-      str[index] = 0;
-      display.drawString(60, 0, str);
+        index = sprintf(str,"%02d:%02d:%02d",Air530.time.hour(),Air530.time.minute(),Air530.time.second(),Air530.time.centisecond());
+        str[index] = 0;
+        display.drawString(60, 0, str);
 
-      if( Air530.location.age() < 10000 )  {
-        display.drawString(120, 0, "A");
-      } else {
-        display.drawString(120, 0, "V");
-      }
+        if( Air530.location.age() < 10000 )  {
+          display.drawString(120, 0, "A");
+        } else {
+          display.drawString(120, 0, "V");
+        }
   
-      index = sprintf(str,"alt: %d.%d",(int)Air530.altitude.meters(),fracPart(Air530.altitude.meters(),2));
-      str[index] = 0;
-      display.drawString(0, 16, str);
+        index = sprintf(str,"alt: %d.%d",(int)Air530.altitude.meters(),fracPart(Air530.altitude.meters(),2));
+        str[index] = 0;
+        display.drawString(0, 16, str);
    
-      index = sprintf(str,"hdop: %d.%d",(int)Air530.hdop.hdop(),fracPart(Air530.hdop.hdop(),2));
-      str[index] = 0;
-      display.drawString(0, 32, str); 
+        index = sprintf(str,"hdop: %d.%d",(int)Air530.hdop.hdop(),fracPart(Air530.hdop.hdop(),2));
+        str[index] = 0;
+        display.drawString(0, 32, str); 
  
-      index = sprintf(str,"lat :  %d.%d",(int)Air530.location.lat(),fracPart(Air530.location.lat(),4));
-      str[index] = 0;
-      display.drawString(60, 16, str);   
+        index = sprintf(str,"lat :  %d.%d",(int)Air530.location.lat(),fracPart(Air530.location.lat(),4));
+        str[index] = 0;
+        display.drawString(60, 16, str);   
   
-      index = sprintf(str,"lon:%d.%d",(int)Air530.location.lng(),fracPart(Air530.location.lng(),4));
-      str[index] = 0;
-      display.drawString(60, 32, str);
+        index = sprintf(str,"lon:%d.%d",(int)Air530.location.lng(),fracPart(Air530.location.lng(),4));
+        str[index] = 0;
+        display.drawString(60, 32, str);
 
-      index = sprintf(str,"speed: %d.%d km/h",(int)Air530.speed.kmph(),fracPart(Air530.speed.kmph(),3));
-      str[index] = 0;
-      display.drawString(0, 48, str);
-      display.display();
+        index = sprintf(str,"speed: %d.%d km/h",(int)Air530.speed.kmph(),fracPart(Air530.speed.kmph(),3));
+        str[index] = 0;
+        display.drawString(0, 48, str);
+        display.display();
+      } else {
+        display.clear();
+        display.setFont(ArialMT_Plain_16);
+        display.setTextAlignment(TEXT_ALIGN_CENTER);
+        display.drawString(64, 20, "POOR GPS");
+        display.setFont(ArialMT_Plain_10);
+        index = sprintf(str,"HDOP: %d.%d",(int)Air530.hdop.hdop(),fracPart(Air530.hdop.hdop(),2));
+        str[index] = 0;
+        display.drawString(64, 45, str); 
+        display.display();      
+        
+      }
     } else {
       display.clear();
       display.setFont(ArialMT_Plain_16);
@@ -153,13 +179,12 @@ void loop()
     case DEVICE_STATE_SEND: {
       if (!joined) {
         //We have just joined. Purge any old characters from GPS serial stream
-        Air530.begin();    
-        while (Air530.available()) {
+        while (Air530.available()) {          
           Air530.read();
         }
       }
       joined=true;
-      if( Air530.location.isValid() && Air530.altitude.isValid() && Air530.location.age() < 10000) {      
+      if( validGPS() && Air530.hdop.hdop() < MAXHDOP) {      
         prepareTxFrame( appPort );
         LoRaWAN.send();      
       }
@@ -168,7 +193,7 @@ void loop()
     }
     case DEVICE_STATE_CYCLE: {
       // Schedule next packet transmission
-      txDutyCycleTime = appTxDutyCycle;// + randr( 0, APP_TX_DUTYCYCLE_RND );
+      txDutyCycleTime = appTxDutyCycle + randr( 0, APP_TX_DUTYCYCLE_RND );
       LoRaWAN.cycle(txDutyCycleTime);
       deviceState = DEVICE_STATE_SLEEP;
       break;
